@@ -1,0 +1,74 @@
+# .appveyor.yml
+
+# Build version
+version: '1.6.37.{build}'
+
+# Use the latest available toolchain
+image: Visual Studio 2019
+
+# fetch repository as zip archive
+shallow_clone: true
+
+# PRs do not increment the build number
+pull_requests:
+  do_not_increment_build_number: true
+
+# Default environment variables
+environment:
+  _IS_BUILD_CANARY: false
+  _RELEASE_NAME: libpng
+  # libpng vars
+  _LIBPNG_TRIPLETNAME: x86-windows-static
+  # vcpkg envs
+  _VCPKG_PATH: C:\Tools\vcpkg
+
+# Prepare Cpp environment
+before_build:
+  - ps: |
+      if ($env:APPVEYOR_REPO_TAG -eq "true" -and $env:APPVEYOR_REPO_TAG_NAME) {
+        $env:APPVEYOR_BUILD_VERSION = $env:APPVEYOR_BUILD_VERSION.Substring(0,$env:APPVEYOR_BUILD_VERSION.LastIndexOf('.')) + ".0"
+        $env:_RELEASE_NAME = $env:_RELEASE_NAME + "-v" + $env:APPVEYOR_BUILD_VERSION
+      } else {
+        $env:_RELEASE_NAME = $env:_RELEASE_NAME + "-Canary"
+        $env:APPVEYOR_REPO_TAG_NAME = "canary"
+        $env:_IS_BUILD_CANARY = "true"
+      }
+  - cmd: |
+      cp -rf patch/* %_VCPKG_PATH%/
+  - ps: |
+      $newFile = New-Item -ItemType "file" -Path "C:\initialized-msys2_64.stamp"
+
+build_script:
+  - cmd: |
+      %_VCPKG_PATH%\vcpkg install "libpng:%_LIBPNG_TRIPLETNAME%" --recurse
+      %_VCPKG_PATH%\vcpkg export "libpng:%_LIBPNG_TRIPLETNAME%" --output=%_RELEASE_NAME% --zip
+      mv %_VCPKG_PATH%\%_RELEASE_NAME%.zip .
+
+test: off
+
+artifacts:
+  - path: ${_RELEASE_NAME}.zip
+    name: ${_RELEASE_NAME}
+
+# Create a GitHub release for every tag
+deploy:
+  # Deploy only when new tags are pushed
+  - provider: GitHub
+    tag: ${appveyor_repo_tag_name}
+    release: ${_RELEASE_NAME}
+    artifact: ${_RELEASE_NAME}
+    auth_token: ${_GH_DEPLOYMENT_TOKEN}
+    on:
+      _IS_BUILD_CANARY: false
+  # Deploy on each commit
+  - provider: GitHub
+    tag: ${appveyor_repo_tag_name}
+    release: ${_RELEASE_NAME} v${appveyor_build_version}
+    artifact: ${_RELEASE_NAME}
+    prerelease: true
+    force_update: true
+    auth_token: ${_GH_DEPLOYMENT_TOKEN}
+    on:
+      _IS_BUILD_CANARY: true
+    description: |
+      This is a canary build. Please be aware it may be prone to crashing and is NOT tested by anyone. Use this build AT YOUR OWN RISK!
